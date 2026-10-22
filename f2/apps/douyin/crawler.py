@@ -91,8 +91,50 @@ from f2.crawlers.base_crawler import BaseCrawler
 from f2.crawlers.websocket_crawler import WebSocketCrawler
 from f2.i18n.translator import _
 from f2.log.logger import logger, trace_logger
+from f2.utils.http.cookie import parse_cookie_str
 from f2.utils.http.endpoint import BaseEndpointManager
 from f2.utils.http.proxy import proxy_url_from_config
+
+
+# 游客 ttwid 进程内缓存，避免每个 crawler 实例都去换一次
+_GUEST_TTWID: Optional[str] = None
+
+
+def _ensure_guest_ttwid(cookie: Optional[str]) -> Optional[str]:
+    """
+    游客 cookie 缺少 ttwid 时自动补齐 (Auto-fill ttwid for guest cookie)
+
+    抖音接口要求请求携带 ttwid 设备标识，未登录时也不例外：缺失时主页作品、用户资料
+    等接口会返回 HTTP 200 但响应体为空，f2 侧表现为「第 N 次请求响应内容为空」后重试
+    至上限。ttwid 可通过 TokenManager.gen_ttwid() 获取，这里进程内缓存一份复用。
+
+    Args:
+        cookie (Optional[str]): 原始 cookie 字符串
+
+    Returns:
+        Optional[str]: 补齐 ttwid 后的 cookie；获取失败时原样返回
+    """
+
+    global _GUEST_TTWID
+
+    cookies = parse_cookie_str(cookie) if isinstance(cookie, str) else {}
+    if "ttwid" in cookies:
+        return cookie
+
+    if _GUEST_TTWID is None:
+        try:
+            _GUEST_TTWID = TokenManager.gen_ttwid()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(_("自动获取 ttwid 失败，继续使用原始 cookie：{0}").format(exc))
+            return cookie
+
+    base = (cookie or "").strip()
+    logger.debug(_("游客 cookie 缺少 ttwid，已自动补充"))
+    if not base:
+        return f"ttwid={_GUEST_TTWID}"
+    if not base.endswith(";"):
+        base += ";"
+    return f"{base} ttwid={_GUEST_TTWID}"
 
 
 class DouyinCrawler(BaseCrawler):
@@ -103,7 +145,9 @@ class DouyinCrawler(BaseCrawler):
         # 需要与cli同步
         kwargs = kwargs or {}
         proxies = kwargs.get("proxies", {"http://": None, "https://": None})
-        cookie = kwargs.get("cookie")
+        # 未登录（或配置里没写 cookie）时自动补 ttwid，否则接口会返回空响应
+        cookie = _ensure_guest_ttwid(kwargs.get("cookie"))
+        kwargs["cookie"] = cookie
         # 自动附加抖音网关要求的 x-tt-argus / uifid 请求头（#443），已配置的同名请求头优先。
         # 标注为 Any 以保持原实现的宽松类型（各接口通过 self.headers.get("User-Agent") 取值）
         self.headers: Any = GatewayHeaderManager.merge_headers(
