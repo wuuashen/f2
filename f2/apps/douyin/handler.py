@@ -9,7 +9,11 @@ from urllib.parse import quote
 from rich.rule import Rule
 
 from f2.apps.douyin.algorithm.webcast_signature import DouyinWebcastSignature
-from f2.apps.douyin.crawler import DouyinCrawler, DouyinWebSocketCrawler
+from f2.apps.douyin.crawler import (
+    DouyinCrawler,
+    DouyinWebSocketCrawler,
+    refresh_guest_ttwid,
+)
 from f2.apps.douyin.db import AsyncUserDB, AsyncVideoDB
 from f2.apps.douyin.dl import DouyinDownloader
 from f2.apps.douyin.filter import (
@@ -169,20 +173,26 @@ class DouyinHandler:
         if not sec_user_id:
             raise ValueError(_("`sec_user_id`不能为空"))
 
-        async with DouyinCrawler(self.kwargs) as crawler:
-            params = UserProfile(sec_user_id=sec_user_id)
-            response = await crawler.fetch_user_profile(params)
-            user = UserProfileFilter(response)
-            # 如果user.status_code是5说明是广告用户，跳过下载
-            if user.status_code == 5:
-                logger.warning(_("检测到广告用户，跳过下载"))
-                return None
+        # 游客 ttwid 偶发被判无效（HTTP 200 + 空响应体），换一个 ttwid 重试一次
+        for attempt in range(2):
+            async with DouyinCrawler(self.kwargs) as crawler:
+                params = UserProfile(sec_user_id=sec_user_id)
+                response = await crawler.fetch_user_profile(params)
+                user = UserProfileFilter(response)
+                # 如果user.status_code是5说明是广告用户，跳过下载
+                if user.status_code == 5:
+                    logger.warning(_("检测到广告用户，跳过下载"))
+                    return None
 
-            if user.nickname is None:
+                if user.nickname is not None:
+                    return user
+
+                if attempt == 0 and refresh_guest_ttwid(self.kwargs):
+                    continue
+
                 raise APIResponseError(
                     _("`fetch_user_profile`请求失败，请更换cookie或稍后再试")
                 )
-            return user
 
     async def fetch_user_active_status(
         self,

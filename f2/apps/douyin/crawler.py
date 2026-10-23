@@ -137,6 +137,45 @@ def _ensure_guest_ttwid(cookie: Optional[str]) -> Optional[str]:
     return f"{base} ttwid={_GUEST_TTWID}"
 
 
+def refresh_guest_ttwid(kwargs: dict) -> bool:
+    """
+    换一个新的游客 ttwid (Rotate the guest ttwid)
+
+    游客 ttwid 偶发会被接口判定无效，表现为 HTTP 200 + 空响应体。此时换一个新的
+    ttwid 重试通常就能通过，避免整次任务直接失败。
+
+    仅对游客 cookie 生效（含 sessionid 的登录 cookie 不处理）。
+
+    Args:
+        kwargs (dict): 运行参数字典，函数会就地更新其中的 cookie
+
+    Returns:
+        bool: 是否成功换新
+    """
+
+    global _GUEST_TTWID
+
+    cookie = kwargs.get("cookie") or ""
+    if not isinstance(cookie, str) or "sessionid" in cookie:
+        return False
+
+    rest = [
+        part.strip()
+        for part in cookie.split(";")
+        if part.strip() and not part.strip().startswith("ttwid=")
+    ]
+    try:
+        _GUEST_TTWID = TokenManager.gen_ttwid()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(_("更换 ttwid 失败：{0}").format(exc))
+        return False
+
+    rest.append(f"ttwid={_GUEST_TTWID}")
+    kwargs["cookie"] = "; ".join(rest)
+    logger.info(_("接口返回空响应，已更换新的游客 ttwid 重试"))
+    return True
+
+
 class DouyinCrawler(BaseCrawler):
     def __init__(
         self,
