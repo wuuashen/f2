@@ -277,6 +277,7 @@ class UserPostFilter(JSONModel):
         # 每个实况图保留完整的 url_list（每张图一个链接列表）：抖音不同 CDN 节点
         # 可用性不一致，部分节点直接 403，只取 url_list[0] 时一旦命中坏节点就会被
         # 误判为「空文件」。下载器支持 List[str]，会按顺序回退到下一个链接。
+        # 注意：视频类作品的 images 为 None，必须用 (images_video or []) 兜住。
         return [
             [
                 [
@@ -289,7 +290,7 @@ class UserPostFilter(JSONModel):
                     )
                     if url
                 ]
-                for live in images_video
+                for live in (images_video or [])
                 if isinstance(live, dict) and live.get("video") is not None
             ]
             for images_video in images_video_list
