@@ -823,8 +823,8 @@ class SecUserIdFetcher(BaseCrawler):
     ```
     """
 
-    _DOUYIN_URL_PATTERN = re.compile(r"user/([^/?]+)")
-    _REDIRECT_URL_PATTERN = re.compile(r"sec_uid=([^&]+)")
+    _DOUYIN_URL_PATTERN = re.compile(r"user/([^/?\\]+)")
+    _REDIRECT_URL_PATTERN = re.compile(r"sec_uid=([^&\\]+)")
     proxies = ClientConfManager.proxies()
 
     def __init__(self, proxies: Optional[dict] = None):
@@ -884,13 +884,23 @@ class SecUserIdFetcher(BaseCrawler):
             if response.status_code in {200, 444}:
                 match = pattern.search(str(response.url))
                 if match:
-                    return match.group(1)
-                else:
-                    raise APIResponseError(
-                        _(
-                            "未在响应的地址中找到sec_user_id，检查链接是否为用户主页。类名：{0}"
-                        ).format(cls.__name__)
+                    # 链接可能带着复制残留（如 shell 里未消掉的反斜杠 `\?from_tab_name\=main`），
+                    # 会粘在 id 尾部导致接口返回空响应，这里按 sec_user_id 合法字符集清洗
+                    raw = match.group(1)
+                    sec_user_id = re.sub(r"[^A-Za-z0-9_\-]", "", raw)
+                    if sec_user_id != raw:
+                        logger.debug(
+                            _("sec_user_id 含多余字符，已清洗：{0} -> {1}").format(
+                                raw, sec_user_id
+                            )
+                        )
+                    if sec_user_id:
+                        return sec_user_id
+                raise APIResponseError(
+                    _("未在响应的地址中找到sec_user_id，检查链接是否为用户主页。类名：{0}").format(
+                        cls.__name__
                     )
+                )
             response.raise_for_status()
             raise APIResponseError(_("获取sec_user_id失败，未知错误"))
 
@@ -1006,9 +1016,9 @@ class AwemeIdFetcher(BaseCrawler):
     ```
     """
 
-    _DOUYIN_VIDEO_URL_PATTERN = re.compile(r"video/([^/?]+)")
-    _DOUYIN_NOTE_URL_PATTERN = re.compile(r"note/([^/?]+)")
-    _DOUYIN_INVAILID_URL_PATTERN = re.compile(r"vid=([^/?&]+)")
+    _DOUYIN_VIDEO_URL_PATTERN = re.compile(r"video/([^/?\\]+)")
+    _DOUYIN_NOTE_URL_PATTERN = re.compile(r"note/([^/?\\]+)")
+    _DOUYIN_INVAILID_URL_PATTERN = re.compile(r"vid=([^/?&\\]+)")
     proxies = ClientConfManager.proxies()
 
     def __init__(self, proxies: Optional[dict] = None):
@@ -1362,9 +1372,9 @@ class WebCastIdFetcher(BaseCrawler):
     ```
     """
 
-    _DOUYIN_LIVE_URL_PATTERN = re.compile(r"live/([^/?]+)")
+    _DOUYIN_LIVE_URL_PATTERN = re.compile(r"live/([^/?\\]+)")
     _DOUYIN_LIVE_URL_PATTERN2 = re.compile(r"http[s]?://live.douyin.com/(\d+)")
-    _DOUYIN_ROOM_URL_PATTERN = re.compile(r"reflow/([^/?]+)")
+    _DOUYIN_ROOM_URL_PATTERN = re.compile(r"reflow/([^/?\\]+)")
     proxies = ClientConfManager.proxies()
 
     def __init__(self, proxies: Optional[dict] = None):
