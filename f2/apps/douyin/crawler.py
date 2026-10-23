@@ -3,6 +3,7 @@
 import asyncio
 import gzip
 import json
+import os
 import traceback
 from typing import Any, Optional, Type, Union
 from urllib.parse import urlencode
@@ -100,6 +101,32 @@ from f2.utils.http.proxy import proxy_url_from_config
 _GUEST_TTWID: Optional[str] = None
 
 
+def _cookie_from_env() -> Optional[str]:
+    """
+    从环境变量读取登录 cookie (Read login cookie from environment)
+
+    配置或命令行都没有 cookie 时，依次尝试：
+    - `F2_COOKIE_FILE`：cookie 文件路径（推荐，权限设 0600，不进 shell 历史也不出现在 ps 里）
+    - `F2_COOKIE`：直接给 cookie 字符串（方便临时用，但会留在进程环境里）
+
+    Returns:
+        Optional[str]: cookie 字符串，都没有则返回 None
+    """
+
+    path = os.environ.get("F2_COOKIE_FILE")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                value = f.read().strip()
+            if value:
+                logger.debug(_("已从 {0} 读取登录 cookie").format(path))
+                return value
+        except OSError as exc:
+            logger.warning(_("读取 cookie 文件失败：{0}").format(exc))
+
+    return os.environ.get("F2_COOKIE") or None
+
+
 def _ensure_guest_ttwid(cookie: Optional[str]) -> Optional[str]:
     """
     游客 cookie 缺少 ttwid 时自动补齐 (Auto-fill ttwid for guest cookie)
@@ -185,7 +212,8 @@ class DouyinCrawler(BaseCrawler):
         kwargs = kwargs or {}
         proxies = kwargs.get("proxies", {"http://": None, "https://": None})
         # 未登录（或配置里没写 cookie）时自动补 ttwid，否则接口会返回空响应
-        cookie = _ensure_guest_ttwid(kwargs.get("cookie"))
+        # cookie 来源优先级：命令行/-c 配置 > 环境变量 > 游客 ttwid
+        cookie = _ensure_guest_ttwid(kwargs.get("cookie") or _cookie_from_env())
         kwargs["cookie"] = cookie
         # 自动附加抖音网关要求的 x-tt-argus / uifid 请求头（#443），已配置的同名请求头优先。
         # 标注为 Any 以保持原实现的宽松类型（各接口通过 self.headers.get("User-Agent") 取值）
